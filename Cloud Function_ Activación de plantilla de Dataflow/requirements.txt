@@ -1,0 +1,4 @@
+# Function dependencies
+google-cloud-storage>=1.11.0
+oauth2client==3.0.0
+google-api-python-client>=1.12.0
