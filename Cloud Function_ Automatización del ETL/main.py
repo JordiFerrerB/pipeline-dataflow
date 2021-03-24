@@ -4,14 +4,11 @@ import time
 import google.auth
 from googleapiclient.discovery import build
 from google.cloud import bigquery
+import random
 
-PROJECT_ID = "preving-cap"
-ETL_DATASET = "CAP_BQ_ETL"
-CTRL_DATASET = "CAP_CTRL_ETL"
-
-""" PROJECT_ID = "preving-personas"
+PROJECT_ID = "preving-personas"
 ETL_DATASET = "PERSONAS_BQ_ETL"
-CTRL_DATASET = "PERSONAS_CTRL_ETL" """
+CTRL_DATASET = "PERSONAS_CTRL_ETL"
 
 credentials, _ = google.auth.default(
     scopes=[
@@ -65,13 +62,14 @@ def get_etl_state():
 def set_updated_table(table):
     # Espera a que no haya trabajos ejecutándose en la tabla de Dependencias
     while table_has_jobs('Dependencias'):
-        print('Esperando a trabajo pendiente...')
-        time.sleep(2)
+        print('Esperando a trabajo pendiente en la tabla de Dependencias...')
+        time.sleep(random.uniform(2.0, 4.5))
 
-    query = "UPDATE {}.{}.Dependencias SET Estado = 'ACTUALIZADO' WHERE LOWER(Tabla) like '{}%'".format(PROJECT_ID, CTRL_DATASET, table.lower())
+    table_name = table.replace(' ', '').lower()
+    query = "UPDATE {}.{}.Dependencias SET Estado = 'ACTUALIZADO' WHERE LOWER(TRIM(Tabla)) = '{}'".format(PROJECT_ID, CTRL_DATASET, table_name)
     result = run_query(query)
 
-    print('Tabla actualizada', table)
+    print('Tabla actualizada', table_name)
 
 def table_has_jobs(table):
     curr_jobs = bq_client.list_jobs(project=PROJECT_ID, state_filter='running')
@@ -99,8 +97,8 @@ def check_group_updates(group):
 
 # Ejecuta las vistas asociadas con el grupo indicado
 def run_group_views(group):
-    #Selecciona las vistas del grupo
-    query = "SELECT Vista_ETL, Dataset_Destino, Tabla_Destino FROM {}.{}.Vistas WHERE Grupo = {}".format(PROJECT_ID, CTRL_DATASET, group)
+    #Selecciona las vistas del grupo solo si el grupo sigue en espera para evitar que procesos paralelos las ejecuten más de una vez
+    query = "SELECT Vista_ETL, Dataset_Destino, Tabla_Destino FROM {}.{}.Vistas v, {}.{}.Grupos g WHERE v.Grupo = {} and v.Grupo = g.Grupo and g.Estado = 'ESPERA'".format(PROJECT_ID, CTRL_DATASET, PROJECT_ID, CTRL_DATASET, group)
     result = run_query(query)
 
     for row in result:
@@ -117,6 +115,11 @@ def set_group_state(group, state):
     run_query(query)
 
 def set_initial_state():
+    # Espera a que todos los trabajos pendientes hayan terminado
+    while table_has_jobs('Dependencias') or table_has_jobs('Grupos'):
+        print('Esperando a trabajos pendientes antes de resetear el estado del ETL...')
+        time.sleep(2)
+
     reset_groups = "UPDATE {}.{}.Grupos SET Estado = 'ESPERA' Where True".format(PROJECT_ID, CTRL_DATASET)
     reset_dependences = "UPDATE {}.{}.Dependencias SET Estado = 'ESPERA' Where True".format(PROJECT_ID, CTRL_DATASET)
     run_query(reset_groups)
